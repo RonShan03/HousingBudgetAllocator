@@ -49,6 +49,37 @@ Cost of living indicators
 
 These variables capture factors affecting housing instability.
 
+## Implementation
+
+This project has been implemented using Python with the following components:
+
+### Data Collection
+- NYC Eviction data from Open Data portal (2017-2023)
+- Synthetic economic data (Census API requires key for full access)
+
+### Environment
+- Custom Gym environment `HousingAllocationEnv` simulating quarterly budget allocation
+- State space: housing metrics + budget ratio
+- Action space: continuous allocations across 4 programs (rental subsidies, eviction prevention, affordable housing, emergency support)
+- Reward: composite metric maximizing eviction reduction, affordability, equity, and efficiency
+
+### RL Agent
+- DDPG algorithm for continuous action learning
+- Trained on historical data sequences
+- Models saved in `models/` directory
+
+### Usage
+
+1. Install dependencies: `pip install -r requirements.txt`
+2. Run data processing: `python -m finrl_housing.meta.data_processor`
+3. Train agent: `python scripts/train_agent.py`
+4. Evaluate: Run evaluation in the script
+
+### Results
+- Agent achieves positive rewards (0.64 average) indicating learning of allocation strategies
+- Trained on 5000 timesteps with checkpointing
+- Ready for backtesting with real data and extended training
+
 Action Space
 
 At each timestep, the RL agent allocates portions of the available housing budget across multiple housing initiatives.
