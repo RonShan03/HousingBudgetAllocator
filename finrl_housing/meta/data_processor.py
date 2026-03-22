@@ -127,6 +127,62 @@ class HousingDataProcessor:
 
         return df
 
+    def load_census_data(self, filename='nyc_census_demographics_2021.csv'):
+        """Load Census ACS borough-level data and create a time series for integration."""
+        filepath = os.path.join(self.raw_dir, filename)
+        if not os.path.exists(filepath):
+            print(f"Census data file not found: {filepath}")
+            return None
+
+        df = pd.read_csv(filepath)
+
+        # if year missing, default to 2021
+        if 'year' not in df.columns:
+            df['year'] = 2021
+
+        # Numeric conversions
+        for col in ['total_population', 'median_household_income', 'median_gross_rent', 'median_home_value', 'unemployed', 'labor_force']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Aggregate borough data to NYC-level by weighted population where relevant
+        agg = {}
+        agg['total_population'] = df['total_population'].sum()
+        agg['median_household_income'] = (df['median_household_income'] * df['total_population']).sum() / agg['total_population']
+        agg['median_gross_rent'] = (df['median_gross_rent'] * df['total_population']).sum() / agg['total_population']
+        agg['median_home_value'] = (df['median_home_value'] * df['total_population']).sum() / agg['total_population']
+
+        if df['labor_force'].sum() > 0:
+            agg['unemployment_rate'] = df['unemployed'].sum() / df['labor_force'].sum()
+        else:
+            agg['unemployment_rate'] = 0.0
+
+        # CPI: use provided CPI if available, otherwise an approximate BLS trend (210+)
+        if 'cpi' in df.columns:
+            df['cpi'] = pd.to_numeric(df['cpi'], errors='coerce')
+            agg['cpi'] = (df['cpi'] * df['total_population']).sum() / agg['total_population']
+        else:
+            agg['cpi'] = 218.056  # 2010 CPI reference (approx. BLS all-items)
+
+        # Build synthetic time series from 2010-2024 from single year values
+        years = range(2010, 2024)
+        data = []
+        for y in years:
+            # Add a simple CPI trend from BLS (approx 2.5% annual inflation)
+            cpi_value = 218.056 * ((1 + 0.025) ** (y - 2010))
+            row = {
+                'year': y,
+                'total_population': agg['total_population'],
+                'median_household_income': agg['median_household_income'],
+                'median_gross_rent': agg['median_gross_rent'],
+                'median_home_value': agg['median_home_value'],
+                'unemployment_rate': agg['unemployment_rate'],
+                'cpi': cpi_value,
+            }
+            data.append(row)
+
+        return pd.DataFrame(data)
+
     def process_data(self):
         """Main data processing pipeline."""
         print("Processing housing data...")
@@ -135,18 +191,22 @@ class HousingDataProcessor:
         evictions = self.load_nyc_evictions()
         if evictions is None:
             print("Using synthetic eviction data...")
-            # Create synthetic eviction data
             years = range(2010, 2024)
             evictions = pd.DataFrame({'year': years})
             for borough in ['BRONX', 'BROOKLYN', 'MANHATTAN', 'QUEENS', 'STATEN ISLAND']:
-                # Base evictions per borough
                 base = {'BRONX': 8000, 'BROOKLYN': 12000, 'MANHATTAN': 10000, 'QUEENS': 9000, 'STATEN ISLAND': 2000}[borough]
                 evictions[f'evictions_{borough.lower()}'] = [
                     int(base * (1 + (y-2010)*0.05 + np.random.normal(0, 0.1))) for y in years
                 ]
 
-        # Load/generate economic data
-        economic = self.generate_synthetic_economic_data()
+        # Load Census or synthetic economic data
+        census_data = self.load_census_data()
+        if census_data is not None:
+            print("Using Census ACS data for economic features")
+            economic = census_data
+        else:
+            print("Using synthetic economic data")
+            economic = self.generate_synthetic_economic_data()
 
         # Merge datasets
         df = pd.merge(economic, evictions, on='year', how='left').fillna(0)

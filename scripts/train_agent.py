@@ -11,8 +11,9 @@ sys.path.append(os.path.dirname(__file__) + '/..')  # Add project root to path
 import numpy as np
 from stable_baselines3 import DDPG
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
-from stable_baselines3.common.results_plotter import plot_results
+from stable_baselines3.common.results_plotter import load_results, ts2xy
 import matplotlib.pyplot as plt
 
 from finrl_housing.meta.env_housing.env_allocation import HousingAllocationEnv
@@ -40,8 +41,8 @@ def train_agent(total_timesteps=10000, model_save_path='models/'):
     log_dir = "logs/"
     os.makedirs(log_dir, exist_ok=True)
 
-    # Create environment
-    env = HousingAllocationEnv()
+    # Create monitored environment for logging
+    env = DummyVecEnv([lambda: Monitor(HousingAllocationEnv(), filename=os.path.join(log_dir, 'monitor.csv'))])
 
     # Create DDPG agent
     model = DDPG(
@@ -96,16 +97,18 @@ def evaluate_agent(model_path, n_episodes=10):
     episode_lengths = []
 
     for episode in range(n_episodes):
-        obs = env.reset()
-        done = False
+        obs, _ = env.reset()
+        terminated = False
+        truncated = False
         episode_reward = 0
         steps = 0
 
-        while not done:
+        while not (terminated or truncated):
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, done, info = env.step(action)
+            obs, reward, terminated, truncated, info = env.step(action)
             episode_reward += reward
             steps += 1
+        done = terminated or truncated
 
         rewards.append(episode_reward)
         episode_lengths.append(steps)
@@ -117,18 +120,73 @@ def evaluate_agent(model_path, n_episodes=10):
 
     return rewards, episode_lengths
 
-def plot_training_results(log_dir="logs/"):
-    """Plot training results."""
-    plot_results([log_dir], num_timesteps=None, x_axis="timesteps", task_name="Housing Allocation")
-    plt.show()
+def plot_training_results(log_dir="logs/", save_path=None):
+    """Plot training reward curve from Monitor logs."""
+    results = load_results(log_dir)
+    if results is None or len(results) == 0:
+        print(f"No monitor results found in {log_dir}")
+        return
+
+    x, y = ts2xy(results, 'timesteps')
+    plt.figure(figsize=(10, 6))
+    plt.plot(x, y, label='Episode Reward')
+    plt.xlabel('Timesteps')
+    plt.ylabel('Reward')
+    plt.title('Training Reward Progress')
+    plt.grid(True)
+    plt.legend()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Saved training plot to {save_path}")
+
+    plt.close()
+
+
+def evaluate_baseline(env, n_episodes=10):
+    """Evaluate baseline equal-allocation policy for comparison."""
+    baseline_rewards = []
+    for episode in range(n_episodes):
+        obs, _ = env.reset()
+        terminated = False
+        truncated = False
+        episode_reward = 0
+        while not (terminated or truncated):
+            action = np.ones(env.action_space.shape) / env.action_space.shape[0]
+            obs, reward, terminated, truncated, info = env.step(action)
+            episode_reward += reward
+        baseline_rewards.append(episode_reward)
+
+    print(f"Baseline (equal allocation) average reward: {np.mean(baseline_rewards):.3f} ± {np.std(baseline_rewards):.3f}")
+    return baseline_rewards
+
 
 if __name__ == "__main__":
+
     # Train agent
     model = train_agent(total_timesteps=5000)  # Small training for demo
 
-    # Evaluate
+    # Plot training metrics
+    plot_training_results(log_dir='logs/', save_path='results/training_reward_curve.png')
+
+    # Evaluate trained agent
     model_path = "models/ddpg_housing_final.zip"
     if os.path.exists(model_path):
-        evaluate_agent(model_path, n_episodes=5)
+        rewards, episode_lengths = evaluate_agent(model_path, n_episodes=5)
+
+        # Baseline comparison
+        env = HousingAllocationEnv()
+        baseline_rewards = evaluate_baseline(env, n_episodes=5)
+
+        # Save comparison chart
+        os.makedirs('results', exist_ok=True)
+        plt.figure(figsize=(10, 6))
+        plt.bar(['Agent', 'Baseline'], [np.mean(rewards), np.mean(baseline_rewards)],
+                yerr=[np.std(rewards), np.std(baseline_rewards)], alpha=0.7)
+        plt.ylabel('Average Episode Reward')
+        plt.title('Policy vs Baseline Comparison')
+        plt.savefig('results/agent_vs_baseline.png', dpi=150, bbox_inches='tight')
+        plt.close()
 
     print("Training and evaluation complete!")

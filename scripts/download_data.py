@@ -60,28 +60,19 @@ def download_nyc_evictions(start_year=2017, end_year=2023):
     else:
         print("No eviction data retrieved")
 
-def download_census_data():
+def download_census_data(year=2021):
     """
     Download demographic and economic data from Census Bureau API.
     Focus on NYC boroughs.
     """
-    print("Downloading Census demographic data...")
+    print(f"Downloading Census demographic data for ACS {year} 5-year...")
 
-    # Census API key - you'll need to register for one at https://www.census.gov/data/developers/data-sets.html
-    api_key = None  # Set your API key here
+    # Census API key (set as env var for security) or hardcode if local only
+    api_key = os.getenv("CENSUS_API_KEY", "a73922599e72700c29d229a244b5689c87a079da")
 
     if not api_key:
         print("Census API key not set. Skipping Census data download.")
         return
-
-    # ACS 5-year estimates for NYC counties (boroughs)
-    counties = {
-        'Bronx': '005',
-        'Kings': '047',  # Brooklyn
-        'New York': '061',  # Manhattan
-        'Queens': '081',
-        'Richmond': '085'  # Staten Island
-    }
 
     variables = {
         'B01003_001E': 'total_population',
@@ -92,41 +83,49 @@ def download_census_data():
         'B23025_003E': 'labor_force'
     }
 
-    base_url = "https://api.census.gov/data/2021/acs/acs5"
+    base_url = f"https://api.census.gov/data/{year}/acs/acs5"
 
-    all_data = []
-    for borough, county_code in counties.items():
-        params = {
-            'get': ','.join(variables.keys()),
-            'for': f'county:{county_code}',
-            'in': 'state:36',  # NY state
-            'key': api_key
-        }
+    params = {
+        'get': ','.join(variables.keys()),
+        'for': 'county:005,047,061,081,085',
+        'in': 'state:36',  # NY state
+        'key': api_key
+    }
 
-        response = requests.get(base_url, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            if len(data) > 1:  # Header + data
-                headers = data[0]
-                values = data[1]
-                row = dict(zip(headers, values))
-                row['borough'] = borough
-                # Rename variables
-                for var_code, var_name in variables.items():
-                    if var_code in row:
-                        row[var_name] = row.pop(var_code)
-                all_data.append(row)
-        else:
-            print(f"Error fetching Census data for {borough}: {response.status_code}")
+    response = requests.get(base_url, params=params)
+    if response.status_code != 200:
+        print(f"Error fetching Census data: {response.status_code}")
+        print(response.text[:500])
+        return
 
-    if all_data:
-        df = pd.DataFrame(all_data)
-        filename = "nyc_census_demographics_2021.csv"
-        filepath = os.path.join(DATA_DIR, filename)
-        df.to_csv(filepath, index=False)
-        print(f"Saved Census data to {filepath}")
-    else:
+    data = response.json()
+    if len(data) <= 1:
         print("No Census data retrieved")
+        return
+
+    # Format to DataFrame
+    headers = data[0]
+    rows = data[1:]
+    df = pd.DataFrame(rows, columns=headers)
+    df = df.rename(columns=variables)
+    df['borough'] = df['county'].map({
+        '005': 'Bronx',
+        '047': 'Kings',
+        '061': 'New York',
+        '081': 'Queens',
+        '085': 'Richmond'
+    })
+    df['year'] = year
+
+    # Cast numeric fields
+    for col in ['total_population', 'median_household_income', 'median_home_value', 'median_gross_rent', 'unemployed', 'labor_force']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    filename = f"nyc_census_demographics_{year}.csv"
+    filepath = os.path.join(DATA_DIR, filename)
+    df.to_csv(filepath, index=False)
+    print(f"Saved Census data to {filepath}")
+
 
 def download_hud_data():
     """

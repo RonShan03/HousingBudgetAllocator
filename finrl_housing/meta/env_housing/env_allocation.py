@@ -5,10 +5,10 @@ Housing Allocation Environment for FinRL Housing project.
 Gym environment simulating housing budget allocation decisions.
 """
 
-import gym
+import gymnasium as gym
 import numpy as np
 import pandas as pd
-from gym import spaces
+from gymnasium import spaces
 from typing import Dict, List, Tuple, Any
 import os
 
@@ -93,8 +93,11 @@ class HousingAllocationEnv(gym.Env):
 
         print(f"Loaded {self.n_timesteps} timesteps of housing data")
 
-    def reset(self) -> np.ndarray:
+    def reset(self, *, seed=None, options=None):
         """Reset environment to initial state."""
+        if seed is not None:
+            np.random.seed(seed)
+
         self.current_step = 0
         self.current_budget = self.initial_budget
         self.total_budget_used = 0
@@ -103,7 +106,7 @@ class HousingAllocationEnv(gym.Env):
         state_features = self.feature_array[0]
         self.current_state = np.concatenate([state_features, [self.current_budget / self.initial_budget]])
 
-        return self.current_state.astype(np.float32)
+        return self.current_state.astype(np.float32), {}
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
         """
@@ -155,7 +158,7 @@ class HousingAllocationEnv(gym.Env):
             'step': self.current_step
         }
 
-        return self.current_state.astype(np.float32), reward, done, info
+        return self.current_state.astype(np.float32), reward, done, False, info
 
     def calculate_reward(self, action: np.ndarray, net_allocation: np.ndarray,
                         next_features: np.ndarray) -> float:
