@@ -1,0 +1,10 @@
+data/
+venv/
+*.pt
+*.pth
+*.ckpt
+*.csv
+*.npy
+logs/
+outputs/
+__pycache__/
